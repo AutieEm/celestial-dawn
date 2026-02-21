@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#060818">
+<title>Celestial Dawn</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#060818;overflow-x:hidden;-webkit-tap-highlight-color:transparent}
+@keyframes twinkle{0%{opacity:.2}100%{opacity:.8}}
+@keyframes pulseGlow{0%,100%{opacity:.6}50%{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes energyFill{from{width:0}to{width:var(--target-width)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const {useState, useEffect} = React;
+
+const DEFAULT_WORK_ARRIVAL = "8:00";
+const DEFAULT_COMMUTE = 30;
+
+function parseTime(str) {
+  const [h, m] = str.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function formatTimeFromMinutes(totalMin) {
+  let m = ((totalMin % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${min.toString().padStart(2, "0")} ${ampm}`;
+}
+
+function computeWorkTimes(arrivalTime, commuteMin) {
+  const arrivalMin = parseTime(arrivalTime);
+  const gatherGoStart = arrivalMin - commuteMin - 15;
+  const getReadyStart = gatherGoStart - 30;
+  const foodStart = getReadyStart - 30;
+  const morningStart = foodStart - 45;
+  const earlyAmEnd = morningStart;
+  return {
+    "early-am": { start: null, end: earlyAmEnd },
+    morning: { start: morningStart, end: foodStart },
+    food: { start: foodStart, end: getReadyStart },
+    "get-ready": { start: getReadyStart, end: gatherGoStart },
+    "gather-go": { start: gatherGoStart, end: arrivalMin },
+  };
+}
+
+const MORNING_CONTAINERS = [
+  { id: "early-am", name: "Early AM", station: "Quiet Systems", icon: "\u25C8",
+    purpose: "Determine that you are safe and ideas are secured.",
+    color: "#7B8CDE", glowColor: "rgba(123, 140, 222, 0.3)", energyLevel: 1,
+    actions: ["Capture", "Wander", "Comforting Music"], showActions: true },
+  { id: "morning", name: "Morning", station: "Dawn Simulation Bay", icon: "\u25B3",
+    purpose: "Feel better about eventually facing the day.",
+    color: "#8175C4", glowColor: "rgba(129, 117, 196, 0.3)", energyLevel: 2,
+    actions: ["Scrape Tongue", "Make Bed", "Heat Lamp", "Bright Light", "PT Exercise", "Water Bottle + Supps"],
+    showActions: true },
+  { id: "food", name: "Food", station: "Provisioning", icon: "\u2B21",
+    purpose: "Ensure that your body gets nourishment today.",
+    color: "#5EC4A0", glowColor: "rgba(94, 196, 160, 0.3)", energyLevel: 3,
+    actions: ["Soapy Water", "Tea", "Heat Thermos", "Heat Lunch", "Assemble + Clean", "Eat Breakfast + Tea"],
+    showActions: true },
+  { id: "get-ready", name: "Get Ready", station: "Crew Quarters", icon: "\u25C7",
+    purpose: "Become the person who is ready to go to work.",
+    color: "#D4789C", glowColor: "rgba(212, 120, 156, 0.3)", energyLevel: 4,
+    actions: [], showActions: false },
+  { id: "gather-go", name: "Gather & Go", station: "Launch Deck", icon: "\u25B7",
+    purpose: "Collect all needed equipment and report to transport station.",
+    color: "#E07B4C", glowColor: "rgba(224, 123, 76, 0.3)", energyLevel: 5,
+    actions: ["Gather Bag", "Lunch + Water", "Keys, Wallet, Phone", "Coat \u00B7 Car Prep \u00B7 Drive"],
+    showActions: true },
+];
+
+const EVENING_CONTAINERS = [
+  { id: "eve-arrive", name: "Arrive & Put Away", station: "Docking Bay", icon: "\u22A1",
+    purpose: "Transition from the outside world. Offload the day and reclaim your space.",
+    color: "#C4985C", glowColor: "rgba(196, 152, 92, 0.3)", energyLevel: 4,
+    actions: ["Put Away Purchases", "Unpack Work Bag", "Unpack Lunch Bag", "Thermos to Soak", "Process Mail", "Capture + Wander"],
+    showActions: true },
+  { id: "eve-food", name: "Food", station: "Mess Hall", icon: "\u2B21",
+    purpose: "Nourish yourself at the end of a long watch.",
+    color: "#7EAE72", glowColor: "rgba(126, 174, 114, 0.3)", energyLevel: 3,
+    actions: ["Soapy Water Bin", "Dinner", "Clear Dishes"],
+    showActions: true },
+  { id: "eve-clean", name: "Clean & Close Out", station: "Systems Maintenance", icon: "\u2B22",
+    purpose: "Complete the day's cycle. Secure the ship for the night watch.",
+    color: "#8E85B5", glowColor: "rgba(142, 133, 181, 0.3)", energyLevel: 2,
+    actions: ["Do Dishes", "Wipe Counters + Sweep", "Done List Activity", "Capture + Wander", "Am I done? Am I safe? Can I rest?"],
+    showActions: true },
+  { id: "eve-selfcare", name: "Self Care & Pleasure", station: "Captain's Quarters", icon: "\u25C9",
+    purpose: "You have done enough. Release the day and let yourself rest.",
+    color: "#5E6A9E", glowColor: "rgba(94, 106, 158, 0.3)", energyLevel: 1,
+    actions: ["Oil Body + PJs", "Teeth + Floss + Sinks Rinse", "YT + Quiet Music", "Bed & Let Go"],
+    showActions: true },
+];
+
+const MORNING_CREW = {
+  "early-am": { crew: "Lt. Cmdr. Reyna", message: "Systems are quiet, Captain. No urgency on the bridge. Take your time." },
+  morning: { crew: "Science Officer Chen", message: "Dawn simulation initiated. Activating primary systems at your pace, Captain." },
+  food: { crew: "Dr. Kahale", message: "Crew readiness improves significantly with proper provisioning, Captain." },
+  "get-ready": { crew: "Lt. Cmdr. Reyna", message: "Final preparations underway. The ship will be ready when you are." },
+  "gather-go": { crew: "Science Officer Chen", message: "All systems green! Launch window is open, Captain!" },
+};
+
+const EVENING_CREW = {
+  "eve-arrive": { crew: "Lt. Cmdr. Reyna", message: "Welcome back to the Dawn, Captain. Docking sequence complete. Stand down at your pace." },
+  "eve-food": { crew: "Dr. Kahale", message: "The crew has earned a good meal, Captain. Take your time with this one." },
+  "eve-clean": { crew: "Science Officer Chen", message: "Running final maintenance sweeps, Captain. Securing systems for night cycle." },
+  "eve-selfcare": { crew: "Lt. Cmdr. Reyna", message: "The bridge is secure. The ship is quiet. Rest well, Captain." },
+};
+
+function App() {
+  const [mode, setMode] = useState("morning");
+  const [activeContainer, setActiveContainer] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [animateIn, setAnimateIn] = useState(true);
+  const [showEarlySettings, setShowEarlySettings] = useState(false);
+  const [customArrival, setCustomArrival] = useState("");
+  const [customCommute, setCustomCommute] = useState("");
+  const [appliedArrival, setAppliedArrival] = useState(DEFAULT_WORK_ARRIVAL);
+  const [appliedCommute, setAppliedCommute] = useState(DEFAULT_COMMUTE);
+
+  const workTimes = computeWorkTimes(appliedArrival, appliedCommute);
+  const containers = mode === "morning" ? MORNING_CONTAINERS : EVENING_CONTAINERS;
+  const crewMessages = mode === "morning" ? MORNING_CREW : EVENING_CREW;
+
+  useEffect(() => { const t = setInterval(() => setCurrentTime(new Date()), 60000); return () => clearInterval(t); }, []);
+  useEffect(() => { setAnimateIn(true); const t = setTimeout(() => setAnimateIn(false), 1200); return () => clearTimeout(t); }, [activeContainer]);
+  useEffect(() => { setActiveContainer(null); setShowEarlySettings(false); }, [mode]);
+
+  const handleApplyEarly = () => { setAppliedArrival(customArrival || DEFAULT_WORK_ARRIVAL); setAppliedCommute(parseInt(customCommute) || DEFAULT_COMMUTE); setShowEarlySettings(false); };
+  const handleResetTimes = () => { setAppliedArrival(DEFAULT_WORK_ARRIVAL); setAppliedCommute(DEFAULT_COMMUTE); setCustomArrival(""); setCustomCommute(""); setShowEarlySettings(false); };
+  const isCustomSchedule = appliedArrival !== DEFAULT_WORK_ARRIVAL || appliedCommute !== DEFAULT_COMMUTE;
+
+  const formatClock = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const formatDate = (d) => d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+  const stardate = () => { const y = currentTime.getFullYear(); const start = new Date(y, 0, 0); const diff = currentTime - start; const day = Math.floor(diff / 86400000); return `${y - 1610}.${day}`; };
+
+  const active = activeContainer ? containers.find((c) => c.id === activeContainer) : null;
+  const crewMsg = activeContainer ? crewMessages[activeContainer] : null;
+
+  const getTimeDisplay = (id) => { const t = workTimes[id]; if (!t) return ""; return `${t.start != null ? formatTimeFromMinutes(t.start) : "Wake"} \u2013 ${t.end != null ? formatTimeFromMinutes(t.end) : ""}`; };
+
+  const getMorningGradient = (l) => { const c = ["#7B8CDE","#8175C4","#5EC4A0","#D4789C","#E07B4C"]; return `linear-gradient(90deg, #7B8CDE, ${c[Math.min(l-1,4)]})`; };
+  const getEveningGradient = (l) => { const c = ["#5E6A9E","#8E85B5","#7EAE72","#C4985C"]; return `linear-gradient(90deg, #C4985C, ${c[Math.min(l-1,3)]})`; };
+  const getEnergyGradient = (l) => mode === "morning" ? getMorningGradient(l) : getEveningGradient(l);
+
+  const arcLabels = mode === "morning" ? { left: "GENTLE", right: "LAUNCH" } : { left: "REST", right: "ACTIVE" };
+  const cn = containers.length;
+  const ep = active ? `${(active.energyLevel / cn) * 100}%` : "0%";
+  const sub = mode === "morning" ? "Morning Bridge Console" : "Evening Bridge Console";
+  const bot = mode === "morning" ? "CELESTIAL DAWN \u00B7 NCC-7201 \u00B7 MORNING OPS" : "CELESTIAL DAWN \u00B7 NCC-7201 \u00B7 STAND DOWN";
+  const sLbl = mode === "morning" ? "MORNING STATIONS" : "EVENING STATIONS";
+  const greet = mode === "morning" ? "Good morning, Captain" : "Welcome home, Captain";
+
+  const s = {
+    vp: { minHeight: "100vh", background: "linear-gradient(170deg, #060818 0%, #0B0F2A 40%, #0D1030 70%, #080A1E 100%)", color: "#C8CCDF", fontFamily: "'Rajdhani', sans-serif", position: "relative", overflow: "hidden", maxWidth: 480, margin: "0 auto", padding: "0 0 24px 0" },
+    sf: { position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0 },
+    sl: { position: "fixed", inset: 0, background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)", pointerEvents: "none", zIndex: 1 },
+    hd: { position: "relative", zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "20px 16px 12px" },
+    sb: { display: "flex", alignItems: "center", gap: 10 },
+    si: { fontSize: 22, color: "#E8A838", filter: "drop-shadow(0 0 6px rgba(232, 168, 56, 0.5))" },
+    sn: { fontFamily: "'Orbitron', sans-serif", fontSize: 13, fontWeight: 700, color: "#E8A838", letterSpacing: 2 },
+    ss: { fontSize: 10, color: "#6A7098", letterSpacing: 1.5, textTransform: "uppercase", marginTop: 1 },
+    tb: { textAlign: "right" },
+    ct: { fontFamily: "'Orbitron', sans-serif", fontSize: 20, fontWeight: 500, color: "#E8D9A8", letterSpacing: 1 },
+    sd: { fontSize: 10, color: "#6A7098", letterSpacing: 1, marginTop: 2 },
+    dt: { fontSize: 11, color: "#8A8FB8", marginTop: 1 },
+    tc: { position: "relative", zIndex: 2, padding: "4px 16px 8px" },
+    tt: { display: "flex", background: "rgba(255,255,255,0.04)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" },
+    tbn: { flex: 1, padding: "10px 0", background: "transparent", border: "none", color: "#6A7098", fontFamily: "'Orbitron', sans-serif", fontSize: 10, fontWeight: 500, letterSpacing: 2, cursor: "pointer", transition: "all 0.25s ease" },
+    ta: { background: "rgba(232, 168, 56, 0.12)", color: "#E8A838", boxShadow: "inset 0 -2px 0 #E8A838" },
+    te: { background: "rgba(94, 106, 158, 0.15)", color: "#8E95C4", boxShadow: "inset 0 -2px 0 #8E95C4" },
+    ea: { position: "relative", zIndex: 2, padding: "0 16px 12px" },
+    et: { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, color: "#6A7098", fontFamily: "'Orbitron', sans-serif", fontSize: 9, letterSpacing: 1.5, padding: "8px 14px", cursor: "pointer", width: "100%", textAlign: "center" },
+    cb: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "rgba(232, 168, 56, 0.08)", border: "1px solid rgba(232, 168, 56, 0.2)", borderRadius: 5, padding: "8px 12px" },
+    cst: { flex: 1, fontFamily: "'Orbitron', sans-serif", fontSize: 9, color: "#E8A838", letterSpacing: 1, minWidth: 150 },
+    edb: { background: "transparent", border: "1px solid rgba(232, 168, 56, 0.3)", borderRadius: 4, color: "#E8A838", fontFamily: "'Orbitron', sans-serif", fontSize: 8, letterSpacing: 1, padding: "4px 10px", cursor: "pointer" },
+    rb: { background: "transparent", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#6A7098", fontFamily: "'Orbitron', sans-serif", fontSize: 8, letterSpacing: 1, padding: "4px 10px", cursor: "pointer" },
+    esp: { background: "rgba(10, 12, 28, 0.9)", border: "1px solid rgba(232, 168, 56, 0.25)", borderRadius: 8, padding: 16 },
+    est: { fontFamily: "'Orbitron', sans-serif", fontSize: 10, color: "#E8A838", letterSpacing: 2, marginBottom: 14, textAlign: "center" },
+    sr: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+    srl: { fontFamily: "'Rajdhani', sans-serif", fontSize: 14, color: "#9A9DBB", fontWeight: 500 },
+    ti: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, color: "#E8D9A8", fontFamily: "'Orbitron', sans-serif", fontSize: 13, padding: "6px 10px", width: 130, textAlign: "center", colorScheme: "dark" },
+    ni: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, color: "#E8D9A8", fontFamily: "'Orbitron', sans-serif", fontSize: 13, padding: "6px 10px", width: 80, textAlign: "center", colorScheme: "dark" },
+    sbs: { display: "flex", gap: 10, marginTop: 4 },
+    ab: { flex: 1, padding: "10px 0", background: "rgba(232, 168, 56, 0.15)", border: "1px solid rgba(232, 168, 56, 0.4)", borderRadius: 5, color: "#E8A838", fontFamily: "'Orbitron', sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: 2, cursor: "pointer" },
+    cab: { flex: 1, padding: "10px 0", background: "transparent", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 5, color: "#6A7098", fontFamily: "'Orbitron', sans-serif", fontSize: 11, letterSpacing: 2, cursor: "pointer" },
+    ap: { position: "relative", zIndex: 2, margin: "0 16px 16px", border: "1px solid", borderRadius: 8, overflow: "hidden" },
+    ape: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+    apt: { width: 4, height: "100%", borderRadius: "0 2px 2px 0" },
+    apc: { padding: "18px 18px 18px 22px" },
+    asl: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 },
+    asn: { fontFamily: "'Orbitron', sans-serif", fontSize: 10, fontWeight: 500, letterSpacing: 2, textTransform: "uppercase" },
+    acn: { fontFamily: "'Orbitron', sans-serif", fontSize: 22, fontWeight: 700, color: "#E8E4D8", marginBottom: 14, letterSpacing: 1 },
+    pb: { background: "rgba(255,255,255,0.03)", borderRadius: 6, padding: "12px 14px", marginBottom: 14, borderLeft: "2px solid rgba(255,255,255,0.08)" },
+    pl: { fontFamily: "'Orbitron', sans-serif", fontSize: 8, fontWeight: 500, color: "#6A7098", letterSpacing: 2, marginBottom: 6 },
+    pt: { fontSize: 15, lineHeight: 1.55, color: "#D0D3E4", fontWeight: 400 },
+    axb: { marginBottom: 14 },
+    axl: { fontFamily: "'Orbitron', sans-serif", fontSize: 8, fontWeight: 500, color: "#6A7098", letterSpacing: 2, marginBottom: 8 },
+    axs: { display: "flex", flexDirection: "column", gap: 6 },
+    axi: { display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "rgba(255,255,255,0.02)", borderRadius: 4 },
+    axd: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
+    axt: { fontSize: 14, color: "#B8BCD2", fontWeight: 500 },
+    earc: { marginBottom: 14 },
+    eal: { fontFamily: "'Orbitron', sans-serif", fontSize: 8, fontWeight: 500, color: "#6A7098", letterSpacing: 2, marginBottom: 6 },
+    eatr: { position: "relative", height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" },
+    eaf: { position: "absolute", left: 0, top: 0, bottom: 0, borderRadius: 3, transition: "width 0.6s ease-out" },
+    eals: { display: "flex", justifyContent: "space-between", marginTop: 3 },
+    ealt: { color: "#4A4F72", fontSize: 9, fontFamily: "'Rajdhani', sans-serif", letterSpacing: 1 },
+    cm: { background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "10px 14px", marginBottom: 10, borderLeft: "2px solid rgba(232, 168, 56, 0.3)" },
+    cmn: { fontFamily: "'Orbitron', sans-serif", fontSize: 9, fontWeight: 500, color: "#E8A838", letterSpacing: 1.5, marginBottom: 4 },
+    cmt: { fontSize: 13, fontStyle: "italic", color: "#9A9DBB", lineHeight: 1.5 },
+    tw: { fontFamily: "'Orbitron', sans-serif", fontSize: 12, color: "#6A7098", textAlign: "center", letterSpacing: 2, marginTop: 4 },
+    stp: { position: "relative", zIndex: 2, margin: "20px 16px 24px", padding: "36px 20px", textAlign: "center", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8 },
+    sti: { fontSize: 32, color: "#E8A838", filter: "drop-shadow(0 0 10px rgba(232, 168, 56, 0.4))", marginBottom: 12, animation: "pulseGlow 3s ease-in-out infinite" },
+    stt: { fontFamily: "'Orbitron', sans-serif", fontSize: 12, color: "#6A7098", letterSpacing: 2, marginBottom: 6 },
+    stst: { fontSize: 16, color: "#9A9DBB", fontWeight: 400 },
+    slb: { position: "relative", zIndex: 2, fontFamily: "'Orbitron', sans-serif", fontSize: 9, fontWeight: 500, color: "#4A4F72", letterSpacing: 2.5, padding: "0 18px 8px" },
+    sg: { position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: 6, padding: "0 16px" },
+    sc: { display: "flex", alignItems: "center", gap: 12, padding: "14px", border: "1px solid", borderRadius: 6, cursor: "pointer", transition: "all 0.25s ease", position: "relative", overflow: "hidden", textAlign: "left", outline: "none" },
+    cl: { flexShrink: 0 },
+    sdo: { width: 10, height: 10, borderRadius: "50%", transition: "box-shadow 0.25s ease" },
+    cc: { flex: 1, minWidth: 0 },
+    ccn: { fontFamily: "'Orbitron', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 1, transition: "color 0.25s ease" },
+    ccs: { fontSize: 11, color: "#5A5F82", letterSpacing: 1, marginTop: 2 },
+    cct: { fontFamily: "'Orbitron', sans-serif", fontSize: 10, color: "#5A5F82", letterSpacing: 1, flexShrink: 0 },
+    cai: { position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", width: 3, height: 24, borderRadius: "3px 0 0 3px" },
+    bf: { position: "relative", zIndex: 2, marginTop: 24, padding: "0 16px", textAlign: "center" },
+    bfl: { height: 1, background: "linear-gradient(90deg, transparent, rgba(232, 168, 56, 0.2), transparent)", marginBottom: 8 },
+    bft: { fontFamily: "'Orbitron', sans-serif", fontSize: 8, color: "#3A3F5A", letterSpacing: 3 },
+  };
+
+  return (
+    <div style={s.vp}>
+      <div style={s.sf}>
+        {Array.from({length:40}).map((_,i)=>(
+          <div key={i} style={{position:"absolute",width:i%3===0?2:1,height:i%3===0?2:1,background:`rgba(${180+((i*7)%75)},${200+((i*3)%55)},255,${0.2+(i%5)*0.12})`,borderRadius:"50%",top:`${((i*37+13)%100)}%`,left:`${((i*53+7)%100)}%`,animation:`twinkle ${2+(i%3)}s ease-in-out ${(i*0.3)%2}s infinite alternate`}}/>
+        ))}
+      </div>
+      <div style={s.sl}/>
+
+      <header style={s.hd}>
+        <div style={s.sb}>
+          <span style={s.si}>{"\u2726"}</span>
+          <div>
+            <div style={s.sn}>CELESTIAL DAWN</div>
+            <div style={s.ss}>{sub}</div>
+          </div>
+        </div>
+        <div style={s.tb}>
+          <div style={s.ct}>{formatClock(currentTime)}</div>
+          <div style={s.sd}>SD {stardate()}</div>
+          <div style={s.dt}>{formatDate(currentTime)}</div>
+        </div>
+      </header>
+
+      <div style={s.tc}>
+        <div style={s.tt}>
+          <button onClick={()=>setMode("morning")} style={{...s.tbn,...(mode==="morning"?s.ta:{})}}>DUTY DAY</button>
+          <button onClick={()=>setMode("evening")} style={{...s.tbn,...(mode==="evening"?s.te:{})}}>STAND DOWN</button>
+        </div>
+      </div>
+
+      {mode==="morning"&&(
+        <div style={s.ea}>
+          {!showEarlySettings&&!isCustomSchedule&&(
+            <button onClick={()=>setShowEarlySettings(true)} style={s.et}>{"\u2699"} EARLY ARRIVAL OVERRIDE</button>
+          )}
+          {isCustomSchedule&&!showEarlySettings&&(
+            <div style={s.cb}>
+              <span style={s.cst}>{"\u2605"} EARLY ARRIVAL: {formatTimeFromMinutes(parseTime(appliedArrival))} {"\u00B7"} {appliedCommute} min commute</span>
+              <button onClick={()=>setShowEarlySettings(true)} style={s.edb}>EDIT</button>
+              <button onClick={handleResetTimes} style={s.rb}>RESET</button>
+            </div>
+          )}
+          {showEarlySettings&&(
+            <div style={s.esp}>
+              <div style={s.est}>EARLY ARRIVAL OVERRIDE</div>
+              <div style={s.sr}>
+                <label style={s.srl}>Arrive by</label>
+                <input type="time" value={customArrival||DEFAULT_WORK_ARRIVAL} onChange={e=>setCustomArrival(e.target.value)} style={s.ti}/>
+              </div>
+              <div style={s.sr}>
+                <label style={s.srl}>Commute (min)</label>
+                <input type="number" value={customCommute||DEFAULT_COMMUTE} onChange={e=>setCustomCommute(e.target.value)} min={5} max={120} style={s.ni}/>
+              </div>
+              <div style={s.sbs}>
+                <button onClick={handleApplyEarly} style={s.ab}>ENGAGE</button>
+                <button onClick={()=>setShowEarlySettings(false)} style={s.cab}>CANCEL</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {active&&(
+        <div style={{...s.ap,borderColor:active.color,boxShadow:`0 0 20px ${active.glowColor}, inset 0 0 30px rgba(0,0,0,0.5)`,animation:animateIn?"slideUp 0.4s ease-out":"none"}}>
+          <div style={s.ape}><div style={{...s.apt,background:active.color}}/></div>
+          <div style={s.apc}>
+            <div style={s.asl}>
+              <span style={{color:active.color,fontSize:18}}>{active.icon}</span>
+              <span style={{...s.asn,color:active.color}}>{active.station}</span>
+            </div>
+            <div style={s.acn}>{active.name}</div>
+            <div style={s.pb}>
+              <div style={s.pl}>MISSION PURPOSE</div>
+              <div style={s.pt}>{active.purpose}</div>
+            </div>
+            {active.showActions&&active.actions.length>0&&(
+              <div style={s.axb}>
+                <div style={s.axl}>STATION ACTIONS</div>
+                <div style={s.axs}>
+                  {active.actions.map((a,i)=>(
+                    <div key={i} style={s.axi}>
+                      <span style={{...s.axd,background:active.color,boxShadow:`0 0 4px ${active.glowColor}`}}/>
+                      <span style={s.axt}>{a}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={s.earc}>
+              <div style={s.eal}>ENERGY ARC</div>
+              <div style={s.eatr}>
+                <div style={{...s.eaf,width:ep,background:getEnergyGradient(active.energyLevel),"--target-width":ep,animation:animateIn?"energyFill 0.8s ease-out":"none"}}/>
+                {containers.map((_,i)=><div key={i} style={{position:"absolute",left:`${((i+1)/cn)*100}%`,top:0,bottom:0,width:1,background:"rgba(255,255,255,0.1)"}}/>)}
+              </div>
+              <div style={s.eals}>
+                <span style={s.ealt}>{arcLabels.left}</span>
+                <span style={s.ealt}>{arcLabels.right}</span>
+              </div>
+            </div>
+            {crewMsg&&(
+              <div style={{...s.cm,animation:animateIn?"fadeIn 0.6s ease-out 0.3s both":"none"}}>
+                <div style={s.cmn}>{crewMsg.crew}</div>
+                <div style={s.cmt}>"{crewMsg.message}"</div>
+              </div>
+            )}
+            {mode==="morning"&&<div style={s.tw}>{getTimeDisplay(active.id)}</div>}
+          </div>
+        </div>
+      )}
+
+      {!active&&(
+        <div style={s.stp}>
+          <div style={s.sti}>{"\u2726"}</div>
+          <div style={s.stt}>Select a station to begin</div>
+          <div style={s.stst}>{greet}</div>
+        </div>
+      )}
+
+      <div style={s.slb}>{sLbl}</div>
+      <div style={s.sg}>
+        {containers.map(c=>{
+          const ia=activeContainer===c.id;
+          return(
+            <button key={c.id} onClick={()=>setActiveContainer(ia?null:c.id)} style={{...s.sc,borderColor:ia?c.color:"rgba(255,255,255,0.08)",background:ia?`linear-gradient(135deg, ${c.glowColor}, rgba(10, 12, 28, 0.95))`:"rgba(10, 12, 28, 0.7)",boxShadow:ia?`0 0 12px ${c.glowColor}`:"none"}}>
+              <div style={s.cl}><div style={{...s.sdo,background:c.color,boxShadow:ia?`0 0 8px ${c.color}`:"none"}}/></div>
+              <div style={s.cc}>
+                <div style={{...s.ccn,color:ia?c.color:"#C8CCDF"}}>{c.icon} {c.name}</div>
+                <div style={s.ccs}>{c.station}</div>
+              </div>
+              {mode==="morning"&&<div style={s.cct}>{workTimes[c.id]?.start!=null?formatTimeFromMinutes(workTimes[c.id].start):"Wake"}</div>}
+              {ia&&<div style={{...s.cai,background:c.color}}/>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={s.bf}>
+        <div style={s.bfl}/>
+        <div style={s.bft}>{bot}</div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
